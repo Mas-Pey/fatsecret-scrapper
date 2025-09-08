@@ -1,31 +1,56 @@
-// Import the framework and instantiate it
 import Fastify from 'fastify'
+import * as cheerio from 'cheerio'
+
 const fastify = Fastify({
-  logger: true
+    logger: true
 })
 
-// Declare a route
-fastify.get('/', async function handler () {
-  return { hello: 'world' }
-})
+interface InfoQuery {
+    search?: string;
+}
 
-fastify.get("/nutrition", async function handler () {
-    const response = await fetch('https://www.fatsecret.co.id/kalori-gizi/search?q=tempe')
+fastify.get("/", async (req: Fastify.FastifyRequest<{ Querystring: InfoQuery }>) => {
+    const keyword = req.query.search ?? "tempe"
+    
+    const response = 
+    await fetch(`https://www.fatsecret.co.id/kalori-gizi/search?q=${encodeURIComponent(keyword)}`, 
+    {
+        headers: { "User-Agent": "Mozilla/5.0" }
+    });
+
     const html = await response.text()
-    return { html }
-})
+    const $ = cheerio.load(html)
+    const results: { name: string; nutrition: string, details: string }[] = []
 
-// async function main() {
-//   const response = await fetch('https://www.fatsecret.co.id/kalori-gizi/search?q=tempe')
-//   const data = await response.text()
-//   console.log(data)
-// }
-// main().catch(console.error)
+    $("a.prominent").each((_, el) => {
+        const name = $(el).text().trim();
+        let nutritionEl = null
+        const isNutritionInfo = $(el).next().hasClass("smallText");
+        if (!isNutritionInfo) {
+            nutritionEl = $(el).next().next()
+        } else {
+            nutritionEl = $(el).next()
+        }
+        const nutrition = nutritionEl
+            .text()
+            .replace(/\s+/g, " ")
+            .replace(/, lagi.*$/i, "")
+            .trim();
+        const relativeLink = $(el).attr("href"); // href="/kalori-gizi/umum/tempe"
+        const details = relativeLink ? new URL(relativeLink, "https://www.fatsecret.co.id").href : "";
+
+        if (name && nutrition) {
+            results.push({name, nutrition, details});
+        }
+    });
+
+    return { results }
+})
 
 // Run the server!
 try {
-  await fastify.listen({ port: 3000 })
+    await fastify.listen({ port: 3000 })
 } catch (err) {
-  fastify.log.error(err)
-  process.exit(1)
+    fastify.log.error(err)
+    process.exit(1)
 }
